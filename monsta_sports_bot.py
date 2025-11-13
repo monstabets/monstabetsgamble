@@ -14,10 +14,10 @@ def home():
 
 # ========================= CONFIG ==============================
 
-TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"     # <- YOUR TOKEN HERE
+TOKEN = "8306653164:AAHGMf5XnLD1ysld1KFCoAy1twcdt-vmcRg"     # <- YOUR TOKEN HERE
 CHAT_ID = -1003318925434
 
-ODDS_API_KEY = "YOUR_ODDS_API_KEY"    # <- YOUR ODDS API KEY HERE
+ODDS_API_KEY = "77936dd856ff66f5d4bfe318884e0ab2"    # <- YOUR ODDS API KEY HERE
 
 SPORTS = [
     "americanfootball_nfl",
@@ -187,6 +187,7 @@ while True:
     except Exception as e:
         print("Error:", e)
     time.sleep(POLL_INTERVAL)
+
 
 
 
