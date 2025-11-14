@@ -15,10 +15,10 @@ def home():
 
 # ========================= CONFIG ==============================
 
-TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"   # <-- put your Telegram bot token here
+TOKEN = "8306653164:AAHGMf5XnLD1ysld1KFCoAy1twcdt-vmcRg"   # <-- put your Telegram bot token here
 CHAT_ID = -1003318925434           # your channel ID
 
-ODDS_API_KEY = "YOUR_ODDS_API_KEY"  # <-- put your odds API key here
+ODDS_API_KEY = "77936dd856ff66f5d4bfe318884e0ab2"  # <-- put your odds API key here
 
 SPORTS = [
     "americanfootball_nfl",
@@ -159,3 +159,4 @@ def check_games():
             for team, new_p in current_probs.items():
                 old_p = old_probs.get(team, new_p)
                 diff_p = new
+
