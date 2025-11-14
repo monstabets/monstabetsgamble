@@ -1,13 +1,24 @@
 import time
+import threading
 import requests
 from datetime import datetime, timezone
+from flask import Flask
+
+# =============== FLASK APP (for Render / health check) ===============
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "MonstaTrades Sports Bot Running"
+# ====================================================================
+
 
 # ========================= CONFIG ==============================
 
-TOKEN = "8306653164:AAHGMf5XnLD1ysld1KFCoAy1twcdt-vmcRg"   # <-- put your Telegram bot token here
+TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"   # <-- put your Telegram bot token here
 CHAT_ID = -1003318925434
 
-ODDS_API_KEY = "77936dd856ff66f5d4bfe318884e0ab2"  # <-- put your odds API key here
+ODDS_API_KEY = "YOUR_ODDS_API_KEY"  # <-- put your odds API key here
 
 SPORTS = [
     "americanfootball_nfl",
@@ -164,7 +175,8 @@ def check_games():
             previous_prices[game_id] = current_prices
 
 
-def main():
+def bot_loop():
+    """Run the betting bot forever in a background thread."""
     send_message("✅ MonstaTrades Sports Bot is now ONLINE.")
     send_message("🔥 TEST ALERT – SPORTS BOT IS WORKING")
     print("Sports bot running...")
@@ -177,5 +189,11 @@ def main():
         time.sleep(POLL_INTERVAL)
 
 
+# start the bot thread as soon as the module is imported (for gunicorn)
+threading.Thread(target=bot_loop, daemon=True).start()
+
+# If you run this file locally: python monsta_sports_bot.py
 if __name__ == "__main__":
-    main()
+    # keep main thread alive when running locally
+    while True:
+        time.sleep(3600)
