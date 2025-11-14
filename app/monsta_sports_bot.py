@@ -75,27 +75,140 @@ def fetch_odds(sport_key: str):
         "oddsFormat": "decimal"
     }
    
-    def compute_certainty(new_p, old_p):
+   def compute_certainty(new_p, old_p):
     """
     Turn implied probability + recent change into a 0–100 'certainty' score.
-    This is NOT real AI, just a simple model using odds movement.
     """
-    base = new_p * 100.0              # current implied probability %
-    change = (new_p - old_p) * 400.0   # reward recent moves (5% move = +20)
+    base = new_p * 100.0
+    change = (new_p - old_p) * 400.0
     score = base + change
 
-    # clamp between 0 and 99 so it looks clean
     if score < 0:
         score = 0
     if score > 99:
         score = 99
     return score
 
-    r = requests.get(url, params=params)
-    if not r.ok:
-        print("Odds API error for", sport_key, ":", r.text)
-        return []
-    return r.json()
+
+def check_games():
+    global previous_probs, previous_prices, start_alert_sent
+
+    now = datetime.now(timezone.utc)
+
+    for sport in SPORTS:
+        games = fetch_odds(sport)
+
+        for game in games:
+            game_id = game.get("id")
+            home = game.get("home_team")
+            away = game.get("away_team")
+            commence = game.get("commence_time")
+
+            if not game.get("bookmakers"):
+                continue
+
+            bookmaker = game["bookmakers"][0]
+            bookname = bookmaker.get("title", "Unknown")
+            outcomes = bookmaker["markets"][0]["outcomes"]
+
+            current_prices = {}
+            current_probs = {}
+
+            for outcome in outcomes:
+                team = outcome["name"]
+                price = float(outcome["price"])
+                current_prices[team] = price
+                current_probs[team] = decimal_to_prob(price)
+
+            # GAME START ALERT
+            if commence:
+                start_time = parse_time(commence)
+                mins_left = (start_time - now).total_seconds() / 60
+
+                if 0 < mins_left <= GAME_START_ALERT_MINUTES and game_id not in start_alert_sent:
+                    send_message(
+                        f"🏟 GAME STARTING SOON\n\n"
+                        f"{home} vs {away}\n"
+                        f"Starts in ~{int(mins_left)} minutes\n"
+                        f"Sport: {sport}\n"
+                        f"Book: {bookname}"
+                    )
+                    start_alert_sent.add(game_id)
+
+            # first time we see this game
+            if game_id not in previous_probs:
+                previous_probs[game_id] = current_probs
+                previous_prices[game_id] = current_prices
+                continue
+
+            old_probs = previous_probs[game_id]
+            old_prices = previous_prices[game_id]
+
+            prob_alerts = []
+            odds_alerts = []
+
+            best_team = None
+            best_cert = -1.0
+
+            for team, new_p in current_probs.items():
+                old_p = old_probs.get(team, new_p)
+                diff_p = new_p - old_p
+
+                # probability move
+                if abs(diff_p) >= PROB_CHANGE_THRESHOLD:
+                    prob_alerts.append(
+                        f"{team}: {old_p*100:.1f}% → {new_p*100:.1f}% ({diff_p*100:+.1f}%)"
+                    )
+
+                # odds move
+                new_price = current_prices.get(team, 0.0)
+                old_price = old_prices.get(team, new_price)
+                diff_price = new_price - old_price
+
+                if abs(diff_price) >= ODDS_MOVE_THRESHOLD:
+                    odds_alerts.append(
+                        f"{team}: {old_price:.2f} → {new_price:.2f} ({diff_price:+.2f})"
+                    )
+
+                # certainty
+                if diff_p > 0:
+                    cert = compute_certainty(new_p, old_p)
+                    if cert > best_cert:
+                        best_cert = cert
+                        best_team = team
+
+            if not prob_alerts and not odds_alerts:
+                previous_probs[game_id] = current_probs
+                previous_prices[game_id] = current_prices
+                continue
+
+            msg_lines = [
+                f"📊 {sport.upper()} LINE MOVE\n",
+                f"{home} vs {away}",
+                f"Book: {bookname}",
+                ""
+            ]
+
+            if prob_alerts:
+                msg_lines.append("🎯 Probability moves:")
+                msg_lines.extend(prob_alerts)
+                msg_lines.append("")
+
+            if odds_alerts:
+                msg_lines.append("📉 Odds moves:")
+                msg_lines.extend(odds_alerts)
+                msg_lines.append("")
+
+            if best_team:
+                msg_lines.append("💡 Suggested bet:")
+                msg_lines.append(f"➡️ {best_team} moneyline")
+                msg_lines.append(f"AI Certainty: {best_cert:.0f}/100")
+                msg_lines.append("⚠️ Gamble responsibly.")
+
+            send_message("\n".join(msg_lines))
+
+            previous_probs[game_id] = current_probs
+            previous_prices[game_id] = current_prices
 
 
 def check_games():
@@ -310,6 +423,7 @@ if __name__ == "__main__":
     # keep main thread alive when running locally
     while True:
         time.sleep(3600)
+
 
 
 
