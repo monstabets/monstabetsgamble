@@ -74,6 +74,23 @@ def fetch_odds(sport_key: str):
         "markets": "h2h",
         "oddsFormat": "decimal"
     }
+   
+    def compute_certainty(new_p, old_p):
+    """
+    Turn implied probability + recent change into a 0–100 'certainty' score.
+    This is NOT real AI, just a simple model using odds movement.
+    """
+    base = new_p * 100.0              # current implied probability %
+    change = (new_p - old_p) * 400.0   # reward recent moves (5% move = +20)
+    score = base + change
+
+    # clamp between 0 and 99 so it looks clean
+    if score < 0:
+        score = 0
+    if score > 99:
+        score = 99
+    return score
+
     r = requests.get(url, params=params)
     if not r.ok:
         print("Odds API error for", sport_key, ":", r.text)
@@ -197,4 +214,5 @@ if __name__ == "__main__":
     # keep main thread alive when running locally
     while True:
         time.sleep(3600)
+
 
