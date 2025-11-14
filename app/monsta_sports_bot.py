@@ -152,6 +152,102 @@ def check_games():
             old_probs = previous_probs[game_id]
             old_prices = previous_prices[game_id]
 
+            # --- build probability + odds alerts ---
+            prob_alerts = []
+            odds_alerts = []
+
+            # also track best side for "what to bet"
+            best_team = None
+            best_cert = -1.0
+
+            for team, new_p in current_probs.items():
+                old_p = old_probs.get(team, new_p)
+                diff_p = new_p - old_p
+
+                # probability move
+                if abs(diff_p) >= PROB_CHANGE_THRESHOLD:
+                    prob_alerts.append(
+                        f"{team}: {old_p*100:.1f}% → {new_p*100:.1f}% ({diff_p*100:+.1f}%)"
+                    )
+
+                # odds move
+                new_price = current_prices.get(team, 0.0)
+                old_price = old_prices.get(team, new_price)
+                diff_price = new_price - old_price
+                if abs(diff_price) >= ODDS_MOVE_THRESHOLD:
+                    odds_alerts.append(
+                        f"{team}: {old_price:.2f} → {new_price:.2f} ({diff_price:+.2f})"
+                    )
+
+                # compute "certainty" / edge for this team
+                # only consider sides whose probability went UP
+                if diff_p > 0:
+                    cert = compute_certainty(new_p, old_p)
+                    if cert > best_cert:
+                        best_cert = cert
+                        best_team = team
+
+            # if nothing moved, skip this game
+            if not prob_alerts and not odds_alerts:
+                previous_probs[game_id] = current_probs
+                previous_prices[game_id] = current_prices
+                continue
+
+            # build one combined alert message
+            msg_lines = [
+                f"📊 {sport.upper()} LINE MOVE\n",
+                f"{home} vs {away}",
+                f"Book: {bookname}",
+                ""
+            ]
+
+            if prob_alerts:
+                msg_lines.append("🎯 Probability moves:")
+                msg_lines.extend(prob_alerts)
+                msg_lines.append("")
+
+            if odds_alerts:
+                msg_lines.append("📉 Odds moves:")
+                msg_lines.extend(odds_alerts)
+                msg_lines.append("")
+
+            # add suggested bet if we have a best_team
+            if best_team is not None:
+                msg_lines.append("💡 Suggested bet (NOT financial advice):")
+                msg_lines.append(f"Bet: {best_team} moneyline")
+                msg_lines.append(f"AI-style certainty: {best_cert:.0f}/100")
+                msg_lines.append("Use bankroll management. Gamble responsibly.")
+
+            send_message("\n".join(msg_lines))
+
+            # update memory
+            previous_probs[game_id] = current_probs
+            previous_prices[game_id] = current_prices
+
+            # GAME START ALERT
+            if commence:
+                start_time = parse_time(commence)
+                mins_left = (start_time - now).total_seconds() / 60
+
+                if 0 < mins_left <= GAME_START_ALERT_MINUTES and game_id not in start_alert_sent:
+                    send_message(
+                        f"🏟 GAME STARTING SOON\n\n"
+                        f"{home} vs {away}\n"
+                        f"Starts in ~{int(mins_left)} minutes\n"
+                        f"Sport: {sport}\n"
+                        f"Book: {bookname}"
+                    )
+                    start_alert_sent.add(game_id)
+
+            # First time seeing this game
+            if game_id not in previous_probs:
+                previous_probs[game_id] = current_probs
+                previous_prices[game_id] = current_prices
+                continue
+
+            old_probs = previous_probs[game_id]
+            old_prices = previous_prices[game_id]
+
             # PROBABILITY ALERT
             prob_alerts = []
             for team, new_p in current_probs.items():
@@ -214,5 +310,6 @@ if __name__ == "__main__":
     # keep main thread alive when running locally
     while True:
         time.sleep(3600)
+
 
 
