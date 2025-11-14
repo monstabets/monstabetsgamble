@@ -1,172 +1,179 @@
-import requests
 import time
-import schedule
-from telegram import Bot
+import requests
+from datetime import datetime, timezone
 
-# ================== CONFIG ==================
-TELEGRAM_BOT_TOKEN = "8306653164:AAHGMf5XnLD1ysld1KFCoAy1twcdt-vmcRg"
-CHAT_ID = "-1003318925434"
+# ========================= CONFIG ==============================
 
-ODDS_API_KEY = "77936dd856ff66f5d4bfe318884e0ab2"
+TOKEN = "8306653164:AAHGMf5XnLD1ysld1KFCoAy1twcdt-vmcRg"   # <-- put your Telegram bot token here
+CHAT_ID = -1003318925434
 
-# Sports to track (add/remove as you want)
+ODDS_API_KEY = "77936dd856ff66f5d4bfe318884e0ab2"  # <-- put your odds API key here
+
 SPORTS = [
-    "basketball_nba",
     "americanfootball_nfl",
-    "icehockey_nhl",
+    "americanfootball_ncaaf",
+    "basketball_nba",
+    "basketball_ncaab",
     "baseball_mlb",
-    "soccer_epl"
+    "icehockey_nhl",
+    "mma_mixed_martial_arts",
+    "soccer_epl",
+    "soccer_uefa_champs_league",
+    "tennis_atp",
 ]
 
-REGIONS = "us"          # us = US books
-MARKETS = "h2h,spreads,totals"  # moneyline, spread, total
-ODDS_FORMAT = "american"
+POLL_INTERVAL = 60                    # seconds between checks
+PROB_CHANGE_THRESHOLD = 0.05
+ODDS_MOVE_THRESHOLD = 0.15
+GAME_START_ALERT_MINUTES = 15
 
-# Thresholds for “movement” alerts
-MIN_ODDS_MOVE = 10          # e.g. -120 → -130 or +100 → +110
-MIN_PROB_MOVE = 0.03        # 3% change in implied probability
-# ============================================
+# ===============================================================
 
-bot = Bot(token=TELEGRAM_BOT_TOKEN)
-
-# Store previous odds to detect changes
-# key: (sport_key, game_id, bookmaker, market, outcome_name)
-# value: {"price": int, "implied_prob": float}
-last_odds_state = {}
+previous_probs = {}
+previous_prices = {}
+start_alert_sent = set()
 
 
-def american_to_implied_prob(odds: int) -> float:
-    """Convert American odds to implied probability (0–1)."""
-    if odds > 0:
-        return 100 / (odds + 100)
-    else:
-        return -odds / (-odds + 100)
+def send_message(text: str):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    params = {"chat_id": CHAT_ID, "text": text}
+    try:
+        r = requests.get(url, params=params)
+        if not r.ok:
+            print("Telegram error:", r.text)
+    except Exception as e:
+        print("Send error:", e)
 
 
-def fetch_odds_for_sport(sport_key: str):
+def decimal_to_prob(decimal_odds: float):
+    return (1.0 / decimal_odds) if decimal_odds > 0 else 0.0
+
+
+def parse_time(iso_string: str):
+    if iso_string.endswith("Z"):
+        iso_string = iso_string[:-1] + "+00:00"
+    return datetime.fromisoformat(iso_string).astimezone(timezone.utc)
+
+
+def fetch_odds(sport_key: str):
     url = f"https://api.the-odds-api.com/v4/sports/{sport_key}/odds"
     params = {
         "apiKey": ODDS_API_KEY,
-        "regions": REGIONS,
-        "markets": MARKETS,
-        "oddsFormat": ODDS_FORMAT
+        "regions": "us",
+        "markets": "h2h",
+        "oddsFormat": "decimal"
     }
-    resp = requests.get(url, params=params, timeout=15)
-    resp.raise_for_status()
-    return resp.json()
+    r = requests.get(url, params=params)
+    if not r.ok:
+        print("Odds API error for", sport_key, ":", r.text)
+        return []
+    return r.json()
 
 
-def build_alert_message(sport_key, game, bookmaker, market, outcome, old, new):
-    home = game.get("home_team")
-    away = game.get("away_team")
-    commences = game.get("commence_time", "N/A")
+def check_games():
+    global previous_probs, previous_prices, start_alert_sent
 
-    line_change = new["price"] - old["price"]
-    prob_change = (new["implied_prob"] - old["implied_prob"]) * 100
+    now = datetime.now(timezone.utc)
 
-    direction = "⬆️" if line_change > 0 else "⬇️"
-    prob_dir = "↑" if prob_change > 0 else "↓"
-
-    msg = (
-        f"🎯 *Odds Movement Alert*\n"
-        f"🏟️ *Sport:* `{sport_key}`\n"
-        f"🆚 *Game:* {away} @ {home}\n"
-        f"⏰ *Start:* `{commences}`\n\n"
-        f"🏛️ *Book:* {bookmaker['title']}\n"
-        f"📈 *Market:* {market['key']}\n"
-        f"🎰 *Outcome:* {outcome['name']}\n\n"
-        f"💵 Odds: {old['price']} → {new['price']}  {direction}\n"
-        f"📊 Implied prob: {old['implied_prob']*100:.1f}% → {new['implied_prob']*100:.1f}% {prob_dir} ({prob_change:+.1f}%)\n"
-    )
-    return msg
-
-
-def check_for_movers():
-    global last_odds_state
-    messages = []
-
-    for sport_key in SPORTS:
-        try:
-            games = fetch_odds_for_sport(sport_key)
-        except Exception as e:
-            print(f"[ERROR] Fetching odds for {sport_key}: {e}")
-            continue
+    for sport in SPORTS:
+        games = fetch_odds(sport)
 
         for game in games:
             game_id = game.get("id")
+            home = game.get("home_team")
+            away = game.get("away_team")
+            commence = game.get("commence_time")
 
-            for bookmaker in game.get("bookmakers", []):
-                book_key = bookmaker.get("key")
+            if not game.get("bookmakers"):
+                continue
 
-                for market in bookmaker.get("markets", []):
-                    market_key = market.get("key")
+            bookmaker = game["bookmakers"][0]
+            bookname = bookmaker.get("title", "Unknown")
+            outcomes = bookmaker["markets"][0]["outcomes"]
 
-                    for outcome in market.get("outcomes", []):
-                        outcome_name = outcome.get("name")
-                        price = outcome.get("price")
+            current_prices = {}
+            current_probs = {}
 
-                        if price is None:
-                            continue
+            for outcome in outcomes:
+                team = outcome["name"]
+                price = float(outcome["price"])
+                current_prices[team] = price
+                current_probs[team] = decimal_to_prob(price)
 
-                        implied_prob = american_to_implied_prob(int(price))
+            # GAME START ALERT
+            if commence:
+                start_time = parse_time(commence)
+                mins_left = (start_time - now).total_seconds() / 60
 
-                        state_key = (sport_key, game_id, book_key, market_key, outcome_name)
-                        new_state = {
-                            "price": int(price),
-                            "implied_prob": implied_prob
-                        }
+                if 0 < mins_left <= GAME_START_ALERT_MINUTES and game_id not in start_alert_sent:
+                    send_message(
+                        f"🏟 GAME STARTING SOON\n\n"
+                        f"{home} vs {away}\n"
+                        f"Starts in ~{int(mins_left)} minutes\n"
+                        f"Sport: {sport}\n"
+                        f"Book: {bookname}"
+                    )
+                    start_alert_sent.add(game_id)
 
-                        if state_key in last_odds_state:
-                            old_state = last_odds_state[state_key]
-                            price_diff = new_state["price"] - old_state["price"]
-                            prob_diff = abs(new_state["implied_prob"] - old_state["implied_prob"])
+            # First time seeing this game
+            if game_id not in previous_probs:
+                previous_probs[game_id] = current_probs
+                previous_prices[game_id] = current_prices
+                continue
 
-                            if abs(price_diff) >= MIN_ODDS_MOVE or prob_diff >= MIN_PROB_MOVE:
-                                # significant movement → alert
-                                msg = build_alert_message(
-                                    sport_key, game, bookmaker, market,
-                                    outcome, old_state, new_state
-                                )
-                                messages.append(msg)
+            old_probs = previous_probs[game_id]
+            old_prices = previous_prices[game_id]
 
-                        # update state
-                        last_odds_state[state_key] = new_state
+            # PROBABILITY ALERT
+            prob_alerts = []
+            for team, new_p in current_probs.items():
+                old_p = old_probs.get(team, 0)
+                diff = new_p - old_p
+                if abs(diff) >= PROB_CHANGE_THRESHOLD:
+                    prob_alerts.append(
+                        f"{team}: {old_p*100:.1f}% → {new_p*100:.1f}% ({diff*100:+.1f}%)"
+                    )
 
-    # send alerts (if any)
-    if not messages:
-        print("No significant movements this run.")
-        return
+            if prob_alerts:
+                send_message(
+                    f"🎯 PROBABILITY MOVE ALERT\n\n"
+                    f"{home} vs {away}\n"
+                    f"Book: {bookname}\n\n" +
+                    "\n".join(prob_alerts)
+                )
 
-    for m in messages:
-        try:
-            bot.send_message(chat_id=CHAT_ID, text=m, parse_mode="Markdown")
-        except Exception as e:
-            print(f"[ERROR] Sending message: {e}")
+            # ODDS ALERT
+            odds_alerts = []
+            for team, new_price in current_prices.items():
+                old_price = old_prices.get(team, 0)
+                diff = new_price - old_price
+                if abs(diff) >= ODDS_MOVE_THRESHOLD:
+                    odds_alerts.append(
+                        f"{team}: {old_price:.2f} → {new_price:.2f} ({diff:+.2f})"
+                    )
 
-    print(f"Sent {len(messages)} movement alerts.")
+            if odds_alerts:
+                send_message(
+                    f"📉 ODDS MOVEMENT ALERT\n\n"
+                    f"{home} vs {away}\n"
+                    f"Book: {bookname}\n\n" +
+                    "\n".join(odds_alerts)
+                )
 
+            previous_probs[game_id] = current_probs
+            previous_prices[game_id] = current_prices
 
-def send_heartbeat():
-    """Optional: ping to confirm bot is alive."""
-    try:
-        bot.send_message(chat_id=CHAT_ID, text="🤖 Monsta Bets bot heartbeat – still watching the lines.")
-    except Exception as e:
-        print(f"[ERROR] Heartbeat failed: {e}")
-
-
-# ==================== MAIN LOOP =====================
 
 def main():
     send_message("✅ MonstaTrades Sports Bot is now ONLINE.")
     send_message("🔥 TEST ALERT – SPORTS BOT IS WORKING")
-
     print("Sports bot running...")
 
     while True:
         try:
             check_games()
         except Exception as e:
-            print("Error:", e)
+            print("Error in bot loop:", e)
         time.sleep(POLL_INTERVAL)
 
 
