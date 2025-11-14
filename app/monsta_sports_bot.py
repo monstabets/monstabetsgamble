@@ -30,7 +30,6 @@ SPORTS = [
     "mma_mixed_martial_arts",
     "soccer_epl",
     "soccer_uefa_champs_league",
-    "tennis_atp",
 ]
 
 POLL_INTERVAL = 60                    # seconds between checks
@@ -159,4 +158,5 @@ def check_games():
             for team, new_p in current_probs.items():
                 old_p = old_probs.get(team, new_p)
                 diff_p = new
+
 
