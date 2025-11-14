@@ -154,24 +154,21 @@ def send_heartbeat():
         print(f"[ERROR] Heartbeat failed: {e}")
 
 
-def main_loop():
-    print("🔥 Monsta Bets odds bot running on Render...")
-    # first run
-    try:
-        bot.send_message(chat_id=CHAT_ID, text="✅ Monsta Bets odds bot started. Tracking line movement.")
-    except Exception as e:
-        print(f"[ERROR] Startup message: {e}")
+# ==================== MAIN LOOP =====================
 
-    # schedule every 14 minutes
-    schedule.every(14).minutes.do(check_for_movers)
-    # optional heartbeat every few hours
-    schedule.every(3).hours.do(send_heartbeat)
+def main():
+    send_message("✅ MonstaTrades Sports Bot is now ONLINE.")
+    send_message("🔥 TEST ALERT – SPORTS BOT IS WORKING")
+
+    print("Sports bot running...")
 
     while True:
-        schedule.run_pending()
-        time.sleep(1)
+        try:
+            check_games()
+        except Exception as e:
+            print("Error:", e)
+        time.sleep(POLL_INTERVAL)
 
 
 if __name__ == "__main__":
-    main_loop()
-
+    main()
