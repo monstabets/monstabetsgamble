@@ -252,26 +252,25 @@ def check_games():
             # Nothing interesting happened → skip
 MIN_CERTAINTY = 75  # only send quality signals
 
-if (
-    not prob_alerts
-    or not odds_alerts
-    or best_team is None
-    or best_cert < MIN_CERTAINTY
-):
-    # skip weak signals
-    previous_probs[game_id] = current_probs
-    previous_prices[game_id] = current_prices
-    
-  continue
+    if (
+        not prob_alerts
+        or not odds_alerts
+        or best_team is None
+        or best_cert < MIN_CERTAINTY
+    ):
+        # skip weak signals
+        previous_probs[game_id] = current_probs
+        previous_prices[game_id] = current_prices
+        continue
 
-# Build clean alert message
-sport_tag = sport.split("_")[0].upper()  # e.g. BASKETBALL_NBA → BASKETBALL
-msg_lines = [
-    f"🏟 <b>{sport_tag}</b> | LINE MOVE\n",
-    f"{home} vs {away}",
-    f"Book: {bookname}",
-    "",
-]
+    # Build clean alert message
+    sport_tag = sport.split("_")[0].upper()  # e.g. BASKETBALL_NBA → BASKETBALL
+    msg_lines = [
+        f"🏟 <b>{sport_tag}</b> | LINE MOVE\n",
+        f"{home} vs {away}",
+        f"Book: {bookname}",
+        "",
+    ]
 
 
             if prob_alerts:
@@ -330,5 +329,6 @@ if __name__ == "__main__":
     # Keep process alive locally (Flask isn't used in this mode)
     while True:
         time.sleep(3600)
+
 
 
